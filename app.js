@@ -1,17 +1,22 @@
-// APP INTENCIONALMENTE VULNERABLE - SOLO PARA FINES EDUCATIVOS (OCY1102)
-// No desplegar en internet.
+// VERSIÓN CORREGIDA (reemplaza app.js en la raíz)
 const express = require('express');
+const helmet = require('helmet');
 const sqlite3 = require('sqlite3').verbose();
-const { exec } = require('child_process');
+const { execFile } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const _ = require('lodash');
 const client = require('prom-client');
 
 const app = express();
-const API_KEY = 'sk-live-1234567890abcdef'; // VULN: secreto hardcodeado
+const API_KEY = process.env.API_KEY; // FIX: secreto desde variable de entorno
+const FILES_DIR = path.join(__dirname, 'files');
 const db = new sqlite3.Database(':memory:');
 client.collectDefaultMetrics();
+app.use(helmet()); // FIX: cabeceras de seguridad, oculta X-Powered-By
+
+const escapeHtml = (s) =>
+  String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 db.serialize(() => {
   db.run('CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, email TEXT, password TEXT)');
@@ -20,7 +25,7 @@ db.serialize(() => {
 });
 
 app.get('/', (req, res) => {
-  res.cookie('session', 'abc123'); // VULN: cookie sin HttpOnly/SameSite
+  res.cookie('session', 'abc123', { httpOnly: true, sameSite: 'strict' }); // FIX
   res.send(`<h1>SecureDev App</h1>
   <ul>
     <li><a href="/search?q=hola">Buscar</a></li>
@@ -31,29 +36,34 @@ app.get('/', (req, res) => {
   <form action="/search" method="get"><input name="q"><button>Buscar</button></form>`);
 });
 
-// VULN: XSS reflejado
+// FIX: salida escapada (XSS)
 app.get('/search', (req, res) => {
-  res.send('<h2>Resultados para: ' + req.query.q + '</h2>');
+  res.send('<h2>Resultados para: ' + escapeHtml(req.query.q || '') + '</h2>');
 });
 
-// VULN: inyección SQL
+// FIX: consulta parametrizada (SQLi) y error genérico
 app.get('/user', (req, res) => {
-  db.get('SELECT id,name,email FROM users WHERE id = ' + req.query.id, (err, row) => {
-    if (err) return res.status(500).send(err.message); // VULN: filtra errores internos
+  const id = Number.parseInt(req.query.id, 10);
+  if (Number.isNaN(id)) return res.status(400).json({ error: 'id inválido' });
+  db.get('SELECT id,name,email FROM users WHERE id = ?', [id], (err, row) => {
+    if (err) return res.status(500).json({ error: 'Error interno' });
     res.json(row || {});
   });
 });
 
-// VULN: inyección de comandos
+// FIX: validación + execFile sin shell (inyección de comandos)
 app.get('/ping', (req, res) => {
-  exec('ping -c 1 ' + req.query.host, (err, stdout, stderr) => {
-    res.type('text').send(stdout || stderr || String(err));
+  const host = String(req.query.host || '');
+  if (!/^[a-zA-Z0-9.-]{1,253}$/.test(host)) return res.status(400).send('Host inválido');
+  execFile('ping', ['-c', '1', host], (err, stdout, stderr) => {
+    res.type('text').send(stdout || stderr || 'Error');
   });
 });
 
-// VULN: path traversal
+// FIX: solo el nombre base del archivo (path traversal)
 app.get('/file', (req, res) => {
-  fs.readFile(path.join(__dirname, 'files', req.query.name), 'utf8', (err, data) => {
+  const name = path.basename(String(req.query.name || ''));
+  fs.readFile(path.join(FILES_DIR, name), 'utf8', (err, data) => {
     if (err) return res.status(404).send('No encontrado');
     res.type('text').send(data);
   });
