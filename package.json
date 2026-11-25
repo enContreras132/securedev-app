@@ -1,0 +1,16 @@
+{
+  "name": "securedev-app",
+  "version": "1.0.0",
+  "description": "App intencionalmente vulnerable para OCY1102",
+  "main": "app.js",
+  "scripts": {
+    "start": "node app.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "express": "4.16.0",
+    "lodash": "4.17.15",
+    "prom-client": "14.0.0",
+    "sqlite3": "5.1.7"
+  }
+}
